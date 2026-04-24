@@ -1,0 +1,36 @@
+<?php
+
+namespace App\Modules\Warehouse\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+class ListInventoryStocksRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function rules(): array
+    {
+        return [
+            'warehouse_id' => [
+                'nullable',
+                Rule::exists('warehouses', 'id')->where(fn ($query) => $query->whereNull('deleted_at')),
+            ],
+            'merchant_id' => [
+                'nullable',
+                Rule::exists('merchants', 'id')->where(fn ($query) => $query->whereNull('deleted_at')),
+            ],
+            'warehouse_product_id' => [
+                'nullable',
+                Rule::exists('warehouse_products', 'id')->where(fn ($query) => $query->whereNull('deleted_at')),
+            ],
+            'low_stock' => ['nullable', 'boolean'],
+        ];
+    }
+}

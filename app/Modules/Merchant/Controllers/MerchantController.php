@@ -3,14 +3,23 @@
 namespace App\Modules\Merchant\Controllers;
 
 use App\Models\Merchant;
+use App\Modules\Dashboard\Resources\DashboardSummaryResource;
+use App\Modules\Dashboard\Services\DashboardSummaryService;
 use App\Modules\Merchant\Requests\StoreMerchantRequest;
 use App\Modules\Merchant\Requests\UpdateMerchantRequest;
 use App\Modules\Merchant\Resources\MerchantResource;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Validation\Rule;
 
 class MerchantController
 {
+    public function __construct(
+        private readonly DashboardSummaryService $dashboardSummaryService,
+    ) {
+    }
+
     public function index(): AnonymousResourceCollection
     {
         $merchants = Merchant::query()->latest()->get();
@@ -53,5 +62,21 @@ class MerchantController
         return response()->json([
             'message' => 'Merchant deleted successfully',
         ]);
+    }
+
+    public function dashboardSummary(Request $request, Merchant $merchant): DashboardSummaryResource
+    {
+        $validated = $request->validate([
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'assigned_driver_id' => [
+                'nullable',
+                Rule::exists('drivers', 'id')->where(fn ($query) => $query->whereNull('deleted_at')),
+            ],
+        ]);
+
+        return new DashboardSummaryResource(
+            $this->dashboardSummaryService->getMerchantSummary($merchant->id, $validated)
+        );
     }
 }

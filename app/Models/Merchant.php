@@ -2,7 +2,9 @@
 
 namespace App\Models;
 
+use App\Modules\Warehouse\Models\WarehouseCharge;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Merchant extends Model
@@ -29,5 +31,10 @@ class Merchant extends Model
         return [
             'deleted_at' => 'datetime',
         ];
+    }
+
+    public function warehouseCharges(): HasMany
+    {
+        return $this->hasMany(WarehouseCharge::class);
     }
 }
