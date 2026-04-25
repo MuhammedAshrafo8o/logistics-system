@@ -5,11 +5,13 @@ namespace App\Modules\Finance\Controllers;
 use App\Modules\Driver\Models\Driver;
 use App\Modules\Finance\Enums\DriverCashClosureStatus;
 use App\Modules\Finance\Models\DriverCashClosure;
+use App\Modules\Finance\Requests\GenerateDriverCashClosureRequest;
 use App\Modules\Finance\Requests\ListDriverCashClosuresRequest;
 use App\Modules\Finance\Requests\StoreDriverCashClosureRequest;
 use App\Modules\Finance\Requests\UpdateDriverCashClosureRequest;
 use App\Modules\Finance\Resources\DriverCashClosureResource;
 use App\Modules\Finance\Resources\DriverExpectedCashResource;
+use App\Modules\Finance\Services\DriverCashClosureExpectedAmountService;
 use App\Modules\Finance\Services\FinanceSummaryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -18,6 +20,7 @@ class DriverCashClosureController
 {
     public function __construct(
         private readonly FinanceSummaryService $financeSummaryService,
+        private readonly DriverCashClosureExpectedAmountService $driverCashClosureExpectedAmountService,
     ) {
     }
 
@@ -51,6 +54,27 @@ class DriverCashClosureController
     public function show(DriverCashClosure $driverCashClosure): DriverCashClosureResource
     {
         return new DriverCashClosureResource($driverCashClosure->load(['driver', 'createdBy', 'verifiedBy']));
+    }
+
+    public function generate(GenerateDriverCashClosureRequest $request, Driver $driver): JsonResponse
+    {
+        $validated = $request->validated();
+        $expectedAmount = $this->driverCashClosureExpectedAmountService->calculate($driver, $validated['date']);
+
+        $closure = DriverCashClosure::create(
+            $this->preparePayload([
+                'driver_id' => $driver->id,
+                'closure_date' => $validated['date'],
+                'expected_amount' => $expectedAmount,
+                'received_amount' => $validated['received_amount'],
+                'status' => $validated['status'] ?? DriverCashClosureStatus::PENDING,
+                'notes' => $validated['notes'] ?? null,
+            ], null, $request->user()?->id)
+        );
+
+        return (new DriverCashClosureResource($closure->load(['driver', 'createdBy', 'verifiedBy'])))
+            ->response()
+            ->setStatusCode(201);
     }
 
     public function update(UpdateDriverCashClosureRequest $request, DriverCashClosure $driverCashClosure): DriverCashClosureResource

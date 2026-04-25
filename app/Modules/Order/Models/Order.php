@@ -6,9 +6,11 @@ use App\Models\Merchant;
 use App\Models\User;
 use App\Modules\LocationPricing\Models\Area;
 use App\Modules\LocationPricing\Models\Governorate;
+use App\Modules\Shipment\Models\Shipment;
 use App\Modules\Warehouse\Models\OrderStockReservation;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -103,8 +105,18 @@ class Order extends Model
         return $this->hasMany(OrderItem::class);
     }
 
+    public function shipment(): HasOne
+    {
+        return $this->hasOne(Shipment::class);
+    }
+
     public function stockReservations(): HasMany
     {
         return $this->hasMany(OrderStockReservation::class);
+    }
+
+    public function latestStockReservation(): HasOne
+    {
+        return $this->hasOne(OrderStockReservation::class)->latestOfMany();
     }
 }

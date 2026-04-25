@@ -7,6 +7,7 @@ class OrderStatus
     public const DRAFT = 'draft';
     public const PENDING_REVIEW = 'pending_review';
     public const CONFIRMED = 'confirmed';
+    public const SHIPMENT_CREATED = 'shipment_created';
     public const CANCELLED = 'cancelled';
 
     /**
@@ -18,6 +19,7 @@ class OrderStatus
             self::DRAFT,
             self::PENDING_REVIEW,
             self::CONFIRMED,
+            self::SHIPMENT_CREATED,
             self::CANCELLED,
         ];
     }

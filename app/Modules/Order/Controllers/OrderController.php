@@ -9,10 +9,12 @@ use App\Modules\Order\Enums\OrderSource;
 use App\Modules\Order\Enums\OrderStatus;
 use App\Modules\Order\Enums\PaymentType;
 use App\Modules\Order\Models\Order;
+use App\Modules\Order\Requests\ListOrdersRequest;
 use App\Modules\Order\Requests\StoreOrderRequest;
 use App\Modules\Order\Requests\UpdateOrderRequest;
 use App\Modules\Order\Resources\OrderResource;
 use App\Modules\Order\Services\OrderShippingFeeService;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -28,10 +30,31 @@ class OrderController
     ) {
     }
 
-    public function index(): AnonymousResourceCollection
+    public function index(ListOrdersRequest $request): AnonymousResourceCollection
     {
+        $validated = $request->validated();
+
         $orders = Order::query()
             ->with($this->relations())
+            ->when(isset($validated['date_from']), fn ($query) => $query->whereDate('created_at', '>=', $validated['date_from']))
+            ->when(isset($validated['date_to']), fn ($query) => $query->whereDate('created_at', '<=', $validated['date_to']))
+            ->when(isset($validated['merchant_id']), fn ($query) => $query->where('merchant_id', $validated['merchant_id']))
+            ->when(isset($validated['merchant_name']), fn ($query) => $query->whereHas('merchant', function ($merchantQuery) use ($validated) {
+                $merchantQuery->where('name', 'like', '%'.$validated['merchant_name'].'%');
+            }))
+            ->when(isset($validated['status']), fn ($query) => $query->where('status', $validated['status']))
+            ->when(isset($validated['fulfillment_type']), fn ($query) => $query->where('fulfillment_type', $validated['fulfillment_type']))
+            ->when(isset($validated['payment_type']), fn ($query) => $query->where('payment_type', $validated['payment_type']))
+            ->when(isset($validated['search']), function ($query) use ($validated) {
+                $search = $validated['search'];
+
+                $query->where(function ($searchQuery) use ($search) {
+                    $searchQuery
+                        ->where('order_number', 'like', '%'.$search.'%')
+                        ->orWhere('customer_name', 'like', '%'.$search.'%')
+                        ->orWhere('customer_phone', 'like', '%'.$search.'%');
+                });
+            })
             ->latest()
             ->get();
 
@@ -66,6 +89,8 @@ class OrderController
 
     public function update(UpdateOrderRequest $request, Order $order): OrderResource
     {
+        $this->ensureOrderCanBeModified($order, 'Order cannot be edited after shipment has been created.');
+
         $order = DB::transaction(function () use ($request, $order) {
             $validated = $request->validated();
             $orderData = $this->buildOrderAttributes($request, $validated);
@@ -92,6 +117,8 @@ class OrderController
 
     public function destroy(Order $order): JsonResponse
     {
+        $this->ensureOrderCanBeModified($order, 'Order cannot be deleted after shipment has been created.');
+
         $order->delete();
 
         return response()->json([
@@ -229,7 +256,18 @@ class OrderController
             'merchant',
             'deliveryGovernorate',
             'deliveryArea',
+            'shipment',
+            'latestStockReservation',
             'items',
         ];
+    }
+
+    private function ensureOrderCanBeModified(Order $order, string $message): void
+    {
+        if ($order->shipment()->exists()) {
+            throw new HttpResponseException(response()->json([
+                'message' => $message,
+            ], 422));
+        }
     }
 }

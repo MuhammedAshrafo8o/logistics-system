@@ -3,6 +3,7 @@
 namespace App\Modules\LocationPricing\Controllers;
 
 use App\Modules\LocationPricing\Models\Area;
+use App\Modules\LocationPricing\Requests\ListAreasRequest;
 use App\Modules\LocationPricing\Requests\StoreAreaRequest;
 use App\Modules\LocationPricing\Requests\UpdateAreaRequest;
 use App\Modules\LocationPricing\Resources\AreaResource;
@@ -11,10 +12,13 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class AreaController
 {
-    public function index(): AnonymousResourceCollection
+    public function index(ListAreasRequest $request): AnonymousResourceCollection
     {
+        $validated = $request->validated();
+
         $areas = Area::query()
             ->with('governorate')
+            ->when(isset($validated['governorate_id']), fn ($query) => $query->where('governorate_id', $validated['governorate_id']))
             ->latest()
             ->get();
 

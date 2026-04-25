@@ -653,6 +653,14 @@ Common error response example:
 - Method: `GET`
 - Authentication: `Yes`
 - Purpose: Returns all areas with their related governorate name.
+- Optional filters:
+- `governorate_id`
+
+Request example:
+
+```text
+GET /api/areas?governorate_id=1
+```
 
 Success response example:
 
@@ -1048,7 +1056,26 @@ Common error response example:
 
 - Method: `GET`
 - Authentication: `Yes`
-- Purpose: Returns all orders ordered by newest first with merchant, delivery location, and items eager loaded.
+- Purpose: Returns all orders ordered by newest first with merchant, delivery location, shipment summary, latest stock reservation summary, and items eager loaded.
+- Optional filters:
+- `date_from`
+- `date_to`
+- `merchant_id`
+- `merchant_name`
+- `status`
+- `fulfillment_type`
+- `payment_type`
+- `search` on `order_number`, `customer_name`, or `customer_phone`
+
+Request examples:
+
+```text
+GET /api/orders?date_from=2026-04-01&date_to=2026-04-25
+GET /api/orders?merchant_id=5
+GET /api/orders?merchant_name=Fast
+GET /api/orders?status=shipment_created&fulfillment_type=pickup_from_merchant
+GET /api/orders?payment_type=cod&search=010
+```
 
 Success response example:
 
@@ -1075,7 +1102,9 @@ Success response example:
       "pickup_notes": null,
       "cod_amount": "450.00",
       "shipping_fee": "80.00",
+      "payment_type": "cod",
       "fulfillment_type": "pickup_from_merchant",
+      "pickup_type": "pickup_from_merchant",
       "is_fragile": false,
       "allow_inspection": true,
       "requires_packaging": false,
@@ -1088,6 +1117,9 @@ Success response example:
       "review_reason": null,
       "status": "draft",
       "notes": "Priority customer",
+      "shipment": null,
+      "has_stock_reservations": false,
+      "stock_reservation_status": null,
       "items": [
         {
           "id": 1,
@@ -1291,7 +1323,7 @@ Common validation error response example:
 
 - Method: `GET`
 - Authentication: `Yes`
-- Purpose: Returns one order by ID with merchant, delivery location, and items eager loaded.
+- Purpose: Returns one order by ID with merchant, delivery location, shipment summary, latest stock reservation summary, and items eager loaded.
 
 Success response example:
 
@@ -1317,7 +1349,9 @@ Success response example:
     "pickup_notes": null,
     "cod_amount": "450.00",
     "shipping_fee": "80.00",
+    "payment_type": "cod",
     "fulfillment_type": "pickup_from_merchant",
+    "pickup_type": "pickup_from_merchant",
     "is_fragile": false,
     "allow_inspection": true,
     "requires_packaging": false,
@@ -1330,6 +1364,13 @@ Success response example:
     "review_reason": null,
     "status": "draft",
     "notes": "Priority customer",
+    "shipment": {
+      "shipment_id": 1,
+      "shipment_number": "SHP-20260424-000001",
+      "shipment_status": "pending_pickup"
+    },
+    "has_stock_reservations": true,
+    "stock_reservation_status": "fulfilled",
     "items": [
       {
         "id": 1,
@@ -1460,6 +1501,7 @@ No items error response example:
 - Method: `PUT`
 - Authentication: `Yes`
 - Purpose: Updates an order inside a database transaction. If `items` is sent, all existing order items are replaced with the new array.
+- Orders that already have a shipment return `422` with `Order cannot be edited after shipment has been created.`
 
 Request body example:
 
@@ -1555,6 +1597,7 @@ Common validation error response example:
 - Method: `DELETE`
 - Authentication: `Yes`
 - Purpose: Soft deletes an order.
+- Orders that already have a shipment return `422` with `Order cannot be deleted after shipment has been created.`
 
 Success response example:
 
@@ -1580,6 +1623,7 @@ Common error response example:
 - One order can have only one shipment for now.
 - Shipment creation copies key delivery and financial fields from the order.
 - Every shipment starts with status `pending_pickup`.
+- After shipment creation, the related order status becomes `shipment_created`.
 - Every shipment status change creates a row in `shipment_status_histories`.
 
 ### GET `/api/track/{shipment_number}`
@@ -1696,6 +1740,62 @@ Common error response example:
 }
 ```
 
+### GET `/api/shipments/print-list`
+
+- Method: `GET`
+- Authentication: `Yes`
+- Purpose: Returns a print-friendly shipment manifest payload filtered by driver, date, delivery location, and optional status.
+- Required filters:
+- `date`
+- Optional filters:
+- `assigned_driver_id`
+- `delivery_governorate_id`
+- `delivery_area_id`
+- `status`
+- Date filter uses shipment `created_at`.
+
+Request example:
+
+```text
+GET /api/shipments/print-list?assigned_driver_id=1&date=2026-04-25&delivery_governorate_id=2&delivery_area_id=5&status=out_for_delivery
+```
+
+Success response example:
+
+```json
+{
+  "data": {
+    "generated_at": "2026-04-25T12:00:00.000000Z",
+    "filters": {
+      "assigned_driver_id": 1,
+      "date": "2026-04-25",
+      "delivery_governorate_id": 2,
+      "delivery_area_id": 5,
+      "status": "out_for_delivery"
+    },
+    "summary": {
+      "total_shipments": 10,
+      "total_cod_amount": "1000.00",
+      "total_shipping_fee": "300.00"
+    },
+    "shipments": [
+      {
+        "shipment_number": "SHP-20260425-000010",
+        "customer_name": "Ahmed Adel",
+        "customer_phone": "01000000000",
+        "delivery_address": "Building 10, Street 12, Cairo",
+        "delivery_governorate_name": "Cairo",
+        "delivery_area_name": "Nasr City",
+        "merchant_name": "Fast Trade",
+        "merchant_phone": "01055555555",
+        "driver_name": "Mahmoud Hassan",
+        "cod_amount": "100.00"
+      }
+    ]
+  }
+}
+```
+
 ### GET `/api/shipments/{shipment}`
 
 - Method: `GET`
@@ -1759,6 +1859,7 @@ Creation rules:
 - Order must not require review.
 - Order must have at least one item.
 - Order must not already have a shipment.
+- After shipment creation, the order status changes to `shipment_created`.
 
 Success response example:
 
@@ -2588,13 +2689,11 @@ Calculation formulas:
 
 - `cod_collected`: sum of `cod_amount` for delivered shipments where `order.payment_type = cod`.
 - `shipping_fees`: sum of `shipping_fee` for delivered shipments.
-- `warehouse_charges`: sum of non-cancelled `warehouse_charges.amount`.
 - `merchant_payable`: sum of `max(cod_amount - shipping_fee, 0)` for delivered shipments.
 - `paid_out`: sum of completed merchant payouts.
 - `pending_payouts`: sum of pending merchant payouts.
 - `remaining_balance`: `merchant_payable - paid_out - pending_payouts`.
 - `company_profit_from_shipping`: same as `shipping_fees`.
-- `warehouse_charges` is displayed separately and does not reduce merchant payout balance yet.
 
 Optional query filters:
 
@@ -2617,7 +2716,6 @@ Success response example:
     "merchant_name": "Ahmed Store",
     "cod_collected": "5000.00",
     "shipping_fees": "600.00",
-    "warehouse_charges": "250.00",
     "merchant_payable": "4400.00",
     "paid_out": "2000.00",
     "pending_payouts": "500.00",
@@ -2699,6 +2797,52 @@ Success response example:
     "verified_by_name": "Admin User",
     "verified_at": "2026-04-24T19:00:00.000000Z",
     "created_at": "2026-04-24T19:00:00.000000Z"
+  }
+}
+```
+
+### POST `/api/drivers/{driver}/cash-closures/generate`
+
+- Method: `POST`
+- Authentication: `Yes`
+- Purpose: Creates a driver cash closure using a system-calculated `expected_amount`.
+- `expected_amount` is not accepted from the request payload.
+- `expected_amount` is calculated from delivered shipments assigned to the driver on the requested date where the related order payment type is `cod`.
+- The calculation uses shipment `updated_at` as the operational delivered date fallback.
+- `difference_amount` is calculated as `received_amount - expected_amount`.
+- If status is `verified`, `verified_by` and `verified_at` are set automatically.
+
+Request body example:
+
+```json
+{
+  "date": "2026-04-25",
+  "received_amount": 5000,
+  "status": "verified",
+  "notes": "Daily closure"
+}
+```
+
+Success response example:
+
+```json
+{
+  "data": {
+    "id": 2,
+    "driver_id": 1,
+    "driver_name": "Mahmoud Hassan",
+    "date": "2026-04-25",
+    "expected_amount": "3000.00",
+    "received_amount": "5000.00",
+    "difference_amount": "2000.00",
+    "status": "verified",
+    "notes": "Daily closure",
+    "created_by": 1,
+    "created_by_name": "Admin User",
+    "verified_by": 1,
+    "verified_by_name": "Admin User",
+    "verified_at": "2026-04-25T18:00:00.000000Z",
+    "created_at": "2026-04-25T18:00:00.000000Z"
   }
 }
 ```
@@ -2809,14 +2953,13 @@ Success response example:
 
 - Method: `GET`
 - Authentication: `Yes`
-- Purpose: Returns company profit summary from delivered shipments, warehouse charges, and expenses.
+- Purpose: Returns company profit summary from delivered shipments and expenses.
 
 Calculation formulas:
 
 - `total_shipping_fees`: sum of `shipping_fee` for delivered shipments.
-- `total_warehouse_charges`: sum of non-cancelled `warehouse_charges.amount`.
 - `total_expenses`: sum of `expenses.amount`.
-- `net_company_profit`: `total_shipping_fees + total_warehouse_charges - total_expenses`.
+- `net_company_profit`: `total_shipping_fees - total_expenses`.
 - `total_cod_collected`: sum of `cod_amount` for delivered COD shipments.
 - `delivered_shipments_count`: count delivered shipments.
 
@@ -2833,9 +2976,8 @@ Success response example:
 {
   "data": {
     "total_shipping_fees": "1000.00",
-    "total_warehouse_charges": "250.00",
     "total_expenses": "300.00",
-    "net_company_profit": "950.00",
+    "net_company_profit": "700.00",
     "total_cod_collected": "5000.00",
     "delivered_shipments_count": 20,
     "filters": {
@@ -2861,7 +3003,7 @@ Success response example:
 
 - Method: `POST`
 - Authentication: `Yes`
-- Purpose: Creates a merchant invoice and calculates shipment totals plus non-cancelled warehouse charges within the period.
+- Purpose: Creates a merchant invoice and calculates totals from delivered shipments within the period.
 - Invoice number is generated automatically in format `INV-YYYYMMDD-000001`.
 - If status is `issued`, `issued_at` is set automatically.
 
@@ -2890,7 +3032,6 @@ Success response example:
     "period_end": "2026-04-24",
     "total_cod": "5000.00",
     "total_shipping_fees": "600.00",
-    "total_warehouse_charges": "250.00",
     "total_payable": "4400.00",
     "status": "issued",
     "notes": "April statement",
@@ -2907,71 +3048,6 @@ Success response example:
 - Method: `GET`
 - Authentication: `Yes`
 - Purpose: Returns one merchant invoice.
-
-### GET `/api/merchant-invoices/{merchantInvoice}/preview`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns structured invoice preview data including merchant info, period, totals, and shipment list.
-
-Success response example:
-
-```json
-{
-  "data": {
-    "merchant": {
-      "id": 1,
-      "name": "Ahmed Store",
-      "phone": "01011111111"
-    },
-    "invoice_id": 1,
-    "invoice_number": "INV-20260424-000001",
-    "status": "issued",
-    "period": {
-      "start": "2026-04-01",
-      "end": "2026-04-24"
-    },
-    "totals": {
-      "total_cod": "5000.00",
-      "total_shipping_fees": "600.00",
-      "total_warehouse_charges": "250.00",
-      "total_payable": "4400.00"
-    },
-    "warehouse_charges": [
-      {
-        "id": 3,
-        "type": "storage",
-        "description": "April storage fee",
-        "quantity": "10.00",
-        "unit_price": "25.00",
-        "amount": "250.00",
-        "status": "pending",
-        "charge_date": "2026-04-24T00:00:00.000000Z",
-        "notes": null
-      }
-    ],
-    "shipments": [
-      {
-        "shipment_id": 1,
-        "shipment_number": "SHP-20260424-000001",
-        "customer_name": "Ahmed Adel",
-        "customer_phone": "01000000000",
-        "payment_type": "cod",
-        "cod_amount": "450.00",
-        "shipping_fee": "80.00",
-        "delivered_at": "2026-04-24T15:00:00.000000Z"
-      }
-    ]
-  }
-}
-```
-
-### GET `/api/merchant-invoices/{merchantInvoice}/download`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Generates and downloads invoice PDF, stores it under `storage/app/private/invoices`, and reuses it if it already exists.
-- On each download, `download_count` is incremented and `last_downloaded_at` is updated.
 
 ### PUT `/api/merchant-invoices/{merchantInvoice}`
 
@@ -3026,96 +3102,6 @@ Success response example:
 }
 ```
 
-### GET `/api/finance/reports/overview`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns high-level finance overview report.
-- Optional filters:
-- `date_from`
-- `date_to`
-- `merchant_id`
-- `driver_id`
-- `status`
-
-Success response example:
-
-```json
-{
-  "data": {
-    "total_orders": 15,
-    "total_shipments": 12,
-    "delivered_shipments": 8,
-    "cod_expected": "5000.00",
-    "cod_collected_verified": "4800.00",
-    "shipping_fees": "1000.00",
-    "warehouse_charges": "250.00",
-    "merchant_payables": "4400.00",
-    "merchant_paid_out": "2000.00",
-    "merchant_remaining_balance": "2400.00",
-    "expenses": "300.00",
-    "company_net_profit": "950.00",
-    "filters": {
-      "date_from": null,
-      "date_to": null,
-      "merchant_id": null,
-      "driver_id": null,
-      "status": null
-    }
-  }
-}
-```
-
-### GET `/api/finance/reports/merchant/{merchant}`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns merchant-specific finance report.
-
-### GET `/api/finance/reports/drivers`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns driver finance report items with shipment counts, expected COD, received COD, and differences.
-
-Success response example:
-
-```json
-{
-  "data": {
-    "items": [
-      {
-        "driver_id": 1,
-        "driver_name": "Mahmoud Hassan",
-        "shipments": 5,
-        "delivered": 3,
-        "expected_cod": "5000.00",
-        "received_cod": "4800.00",
-        "differences": "-200.00"
-      }
-    ],
-    "filters": {
-      "date_from": null,
-      "date_to": null,
-      "driver_id": null,
-      "status": null
-    }
-  }
-}
-```
-
-### GET `/api/finance/reports/expenses`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns total expenses and grouped amounts by category.
-
-### GET `/api/finance/reports/payouts`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns total payouts, pending payouts, and completed payouts.
-
 ### GET `/api/user`
 
 - Method: `GET`
@@ -3145,755 +3131,62 @@ Common error response example:
 }
 ```
 
-## Warehouse APIs
-
-### Warehouse Notes
-
-- Warehouse products always belong to a merchant.
-- Stock adjustment in Phase 1 supports `in`, `out`, `damaged`, and basic `adjustment`.
-- Warehouse Phase 2 adds order stock reservation, release, and fulfillment for orders where `fulfillment_type = from_warehouse`.
-- Reservation decreases `quantity_available` and increases `quantity_reserved`.
-- Releasing stock moves quantity back from `reserved` to `available`.
-- Fulfilling warehouse stock deducts from `quantity_reserved` and records stock movement type `out`.
-
-### GET `/api/warehouses`
+### GET `/api/dashboard/summary`
 
 - Method: `GET`
 - Authentication: `Yes`
-- Purpose: Returns all warehouses.
+- Purpose: Returns high-level dashboard summary data.
 
-### POST `/api/warehouses`
+Response includes:
 
-- Method: `POST`
-- Authentication: `Yes`
-- Purpose: Creates a warehouse.
-
-Request body example:
-
-```json
-{
-  "name": "Main Warehouse",
-  "code": "WH-CAI-01",
-  "address": "Industrial Zone",
-  "governorate_id": 1,
-  "area_id": 2,
-  "status": "active",
-  "notes": "Primary storage location"
-}
-```
+- `total_revenue`: sum of `shipping_fee` for delivered shipments.
+- `total_expenses`: sum of `amount` for expenses.
+- `net_profit`: `total_revenue - total_expenses`.
+- `total_orders`: count of all orders.
+- `delivered_orders`: count of delivered orders.
+- `returned_orders`: count of returned orders.
+- `total_shipments`: count of all shipments.
+- `out_for_delivery_shipments`: count of shipments with status 'out_for_delivery'.
+- `cod_expected`: sum of `cod_amount` for delivered COD shipments.
+- `cod_collected`: sum of `received_amount` from verified driver cash closures.
+- `cod_difference`: `cod_collected - cod_expected`.
+- `revenue_by_status`: breakdown of shipping fees by status (delivered, returned, cancelled, pending).
+- `monthly_summary`: total revenue and delivered orders per month for the last 6 months.
+- `recent_shipments`: last 10 shipments.
+- `low_stock_products`: list of warehouse products with quantity below threshold (10% of capacity).
 
 Success response example:
 
 ```json
 {
   "data": {
-    "id": 1,
-    "name": "Main Warehouse",
-    "code": "WH-CAI-01",
-    "address": "Industrial Zone",
-    "governorate_id": 1,
-    "governorate_name": "Cairo",
-    "area_id": 2,
-    "area_name": "Nasr City",
-    "status": "active",
-    "notes": "Primary storage location",
-    "created_at": "2026-04-25T09:00:00.000000Z"
-  }
-}
-```
-
-### GET `/api/warehouse-products`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns warehouse products.
-- Optional filters:
-- `merchant_id`
-- `status`
-- `search` on `name`, `sku`, `barcode`
-
-### POST `/api/warehouse-products`
-
-- Method: `POST`
-- Authentication: `Yes`
-- Purpose: Creates a warehouse product for a merchant.
-
-Request body example:
-
-```json
-{
-  "merchant_id": 1,
-  "name": "Blue T-Shirt",
-  "sku": "TSHIRT-BLUE-M",
-  "barcode": "1234567890",
-  "description": "Cotton T-Shirt",
-  "unit_weight": 0.35,
-  "is_fragile": false,
-  "requires_packaging": true,
-  "status": "active"
-}
-```
-
-Success response example:
-
-```json
-{
-  "data": {
-    "id": 1,
-    "merchant_id": 1,
-    "merchant_name": "Ahmed Store",
-    "name": "Blue T-Shirt",
-    "sku": "TSHIRT-BLUE-M",
-    "barcode": "1234567890",
-    "description": "Cotton T-Shirt",
-    "unit_weight": "0.35",
-    "unit_length": null,
-    "unit_width": null,
-    "unit_height": null,
-    "is_fragile": false,
-    "requires_packaging": true,
-    "status": "active",
-    "notes": null,
-    "created_at": "2026-04-25T09:10:00.000000Z"
-  }
-}
-```
-
-### GET `/api/inventory-stocks`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns inventory stock rows.
-- Optional filters:
-- `warehouse_id`
-- `merchant_id`
-- `warehouse_product_id`
-- `low_stock=true`
-
-### POST `/api/inventory-stocks/adjust`
-
-- Method: `POST`
-- Authentication: `Yes`
-- Purpose: Applies a manual stock adjustment and records a stock movement.
-
-Request body example:
-
-```json
-{
-  "warehouse_id": 1,
-  "warehouse_product_id": 1,
-  "type": "in",
-  "quantity": 100,
-  "notes": "Initial stock intake"
-}
-```
-
-Success response example:
-
-```json
-{
-  "data": {
-    "id": 1,
-    "warehouse_id": 1,
-    "warehouse_name": "Main Warehouse",
-    "warehouse_product_id": 1,
-    "product_name": "Blue T-Shirt",
-    "merchant_id": 1,
-    "merchant_name": "Ahmed Store",
-    "sku": "TSHIRT-BLUE-M",
-    "barcode": "1234567890",
-    "quantity_available": 100,
-    "quantity_reserved": 0,
-    "quantity_damaged": 0,
-    "created_at": "2026-04-25T09:15:00.000000Z",
-    "updated_at": "2026-04-25T09:15:00.000000Z"
-  }
-}
-```
-
-Common error response example:
-
-```json
-{
-  "message": "Not enough available stock."
-}
-```
-
-### GET `/api/stock-movements`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns stock movement history.
-- Optional filters:
-- `warehouse_id`
-- `merchant_id`
-- `warehouse_product_id`
-- `type`
-- `date_from`
-- `date_to`
-
-Success response example:
-
-```json
-{
-  "data": [
-    {
-      "id": 1,
-      "warehouse_id": 1,
-      "warehouse_name": "Main Warehouse",
-      "warehouse_product_id": 1,
-      "product_name": "Blue T-Shirt",
-      "merchant_id": 1,
-      "merchant_name": "Ahmed Store",
-      "type": "in",
-      "quantity": 100,
-      "before_available": 0,
-      "after_available": 100,
-      "before_reserved": 0,
-      "after_reserved": 0,
-      "before_damaged": 0,
-      "after_damaged": 0,
-      "reference_type": null,
-      "reference_id": null,
-      "notes": "Initial stock intake",
-      "created_by": 1,
-      "created_by_name": "Admin User",
-      "created_at": "2026-04-25T09:15:00.000000Z"
-    }
-  ]
-}
-```
-
-### GET `/api/merchants/{merchant}/warehouse/inventory`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns inventory stocks for the selected merchant only.
-
-### GET `/api/merchants/{merchant}/warehouse/movements`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns stock movements for the selected merchant only.
-
-### POST `/api/warehouse-returns`
-
-- Method: `POST`
-- Authentication: `Yes`
-- Purpose: Records a warehouse return and updates stock based on the returned condition inside a database transaction.
-- Conditions:
-- `sellable`: increases `quantity_available` and creates stock movement type `in`.
-- `damaged`: increases `quantity_damaged` and creates stock movement type `damaged`.
-- `disposed`: leaves stock quantities unchanged and creates stock movement type `adjustment`.
-
-Request body example:
-
-```json
-{
-  "shipment_id": 8,
-  "order_id": 15,
-  "warehouse_id": 1,
-  "warehouse_product_id": 4,
-  "quantity": 2,
-  "condition": "sellable",
-  "notes": "Customer refused delivery, items are intact"
-}
-```
-
-Success response example:
-
-```json
-{
-  "data": {
-    "id": 1,
-    "shipment_id": 8,
-    "order_id": 15,
-    "warehouse_id": 1,
-    "warehouse_name": "Main Warehouse",
-    "warehouse_product_id": 4,
-    "product_name": "Blue T-Shirt",
-    "merchant_id": 1,
-    "merchant_name": "Ahmed Store",
-    "quantity": 2,
-    "condition": "sellable",
-    "notes": "Customer refused delivery, items are intact",
-    "created_by": 1,
-    "created_by_name": "Admin User",
-    "created_at": "2026-04-25T12:00:00.000000Z"
-  }
-}
-```
-
-### GET `/api/warehouse-returns`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns warehouse returns with optional filters.
-- Optional filters:
-- `shipment_id`
-- `order_id`
-- `warehouse_id`
-- `merchant_id`
-- `warehouse_product_id`
-- `condition`
-- `date_from`
-- `date_to`
-
-Request examples:
-
-```text
-GET /api/warehouse-returns
-GET /api/warehouse-returns?condition=damaged&warehouse_id=1
-GET /api/warehouse-returns?merchant_id=1&date_from=2026-04-01&date_to=2026-04-25
-```
-
-Success response example:
-
-```json
-{
-  "data": [
-    {
-      "id": 1,
-      "shipment_id": 8,
-      "order_id": 15,
-      "warehouse_id": 1,
-      "warehouse_name": "Main Warehouse",
-      "warehouse_product_id": 4,
-      "product_name": "Blue T-Shirt",
-      "merchant_id": 1,
-      "merchant_name": "Ahmed Store",
-      "quantity": 2,
-      "condition": "sellable",
-      "notes": "Customer refused delivery, items are intact",
-      "created_by": 1,
-      "created_by_name": "Admin User",
-      "created_at": "2026-04-25T12:00:00.000000Z"
-    }
-  ]
-}
-```
-
-### GET `/api/warehouse-returns/{warehouseReturn}`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns one warehouse return by ID.
-
-### GET `/api/warehouse-charges`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns warehouse charges with optional filters.
-- Optional filters:
-- `merchant_id`
-- `warehouse_id`
-- `type`
-- `status`
-- `date_from`
-- `date_to`
-
-### POST `/api/warehouse-charges`
-
-- Method: `POST`
-- Authentication: `Yes`
-- Purpose: Creates a warehouse-related merchant charge.
-- Logic:
-- `amount = quantity * unit_price`
-- `quantity` defaults to `1.00` if omitted.
-- `charge_date` defaults to today if omitted.
-
-Request body example:
-
-```json
-{
-  "merchant_id": 1,
-  "warehouse_id": 1,
-  "order_id": 15,
-  "shipment_id": 8,
-  "warehouse_product_id": 4,
-  "type": "return_handling",
-  "description": "Returned shipment handling",
-  "quantity": 1,
-  "unit_price": 35,
-  "status": "pending",
-  "charge_date": "2026-04-25",
-  "notes": "Manual charge"
-}
-```
-
-Success response example:
-
-```json
-{
-  "data": {
-    "id": 1,
-    "merchant_id": 1,
-    "merchant_name": "Ahmed Store",
-    "warehouse_id": 1,
-    "warehouse_name": "Main Warehouse",
-    "order_id": 15,
-    "shipment_id": 8,
-    "warehouse_product_id": 4,
-    "product_name": "Blue T-Shirt",
-    "type": "return_handling",
-    "description": "Returned shipment handling",
-    "quantity": "1.00",
-    "unit_price": "35.00",
-    "amount": "35.00",
-    "status": "pending",
-    "charge_date": "2026-04-25T00:00:00.000000Z",
-    "notes": "Manual charge",
-    "created_by": 1,
-    "created_by_name": "Admin User",
-    "created_at": "2026-04-25T12:10:00.000000Z"
-  }
-}
-```
-
-### GET `/api/warehouse-charges/{warehouseCharge}`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns one warehouse charge by ID.
-
-### PUT `/api/warehouse-charges/{warehouseCharge}`
-
-- Method: `PUT`
-- Authentication: `Yes`
-- Purpose: Updates a warehouse charge and recalculates `amount` when `quantity` or `unit_price` changes.
-
-### DELETE `/api/warehouse-charges/{warehouseCharge}`
-
-- Method: `DELETE`
-- Authentication: `Yes`
-- Purpose: Soft deletes a warehouse charge.
-
-Success response example:
-
-```json
-{
-  "message": "Warehouse charge deleted successfully"
-}
-```
-
-### GET `/api/merchants/{merchant}/warehouse/charges`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns warehouse charges for the selected merchant only.
-- Optional filters:
-- `warehouse_id`
-- `type`
-- `status`
-- `date_from`
-- `date_to`
-
-### POST `/api/orders/{order}/reserve-stock`
-
-- Method: `POST`
-- Authentication: `Yes`
-- Purpose: Reserves warehouse stock for a warehouse-fulfilled order inside a single database transaction.
-- Rules:
-- Order must have `fulfillment_type = from_warehouse`.
-- Order must not be `cancelled`.
-- Order must not already have active `reserved` stock reservations.
-- Every `order_item_id` must belong to the order.
-- Every `warehouse_product_id` must belong to the same merchant as the order.
-- If any item fails, the whole reservation request is rolled back.
-
-Request body example:
-
-```json
-{
-  "warehouse_id": 1,
-  "items": [
-    {
-      "order_item_id": 10,
-      "warehouse_product_id": 4,
-      "quantity": 2
+    "total_revenue": "1000.00",
+    "total_expenses": "300.00",
+    "net_profit": "700.00",
+    "total_orders": 50,
+    "delivered_orders": 20,
+    "returned_orders": 5,
+    "total_shipments": 40,
+    "out_for_delivery_shipments": 12,
+    "cod_expected": "5000.00",
+    "cod_collected": "4800.00",
+    "cod_difference": "-200.00",
+    "revenue_by_status": {
+      "delivered": "800.00",
+      "returned": "100.00",
+      "cancelled": "50.00",
+      "pending": "50.00"
     },
-    {
-      "order_item_id": 11,
-      "warehouse_product_id": 5,
-      "quantity": 1
-    }
-  ]
-}
-```
-
-Success response example:
-
-```json
-{
-  "data": {
-    "id": 15,
-    "merchant_id": 1,
-    "merchant_name": "Ahmed Store",
-    "order_number": "ORD-20260425-000015",
-    "customer_name": "Mona Hossam",
-    "customer_phone": "01012345678",
-    "customer_phone_alt": null,
-    "delivery_governorate_id": 1,
-    "delivery_governorate_name": "Cairo",
-    "delivery_area_id": 2,
-    "delivery_area_name": "Nasr City",
-    "delivery_address": "Building 18",
-    "delivery_notes": null,
-    "pickup_governorate_id": null,
-    "pickup_area_id": null,
-    "pickup_address": null,
-    "pickup_notes": null,
-    "cod_amount": "350.00",
-    "shipping_fee": "60.00",
-    "payment_type": "cod",
-    "fulfillment_type": "from_warehouse",
-    "is_fragile": false,
-    "allow_inspection": true,
-    "requires_packaging": false,
-    "package_notes": null,
-    "source": "manual",
-    "external_source": null,
-    "external_order_id": null,
-    "external_order_number": null,
-    "requires_review": false,
-    "review_reason": null,
-    "status": "confirmed",
-    "notes": null,
-    "items": [
-      {
-        "id": 10,
-        "product_name": "Blue T-Shirt",
-        "sku": "TSHIRT-BLUE-M",
-        "quantity": 2,
-        "unit_price": "120.00",
-        "weight": "0.35",
-        "notes": null,
-        "created_at": "2026-04-25T10:15:00.000000Z"
-      }
+    "monthly_summary": [
+      { "month": "2026-03", "revenue": "800.00", "delivered_orders": 15 },
+      { "month": "2026-04", "revenue": "200.00", "delivered_orders": 5 }
     ],
-    "stock_reservations": [
-      {
-        "id": 1,
-        "order_id": 15,
-        "order_item_id": 10,
-        "warehouse_id": 1,
-        "warehouse_name": "Main Warehouse",
-        "warehouse_product_id": 4,
-        "product_name": "Blue T-Shirt",
-        "merchant_id": 1,
-        "merchant_name": "Ahmed Store",
-        "quantity": 2,
-        "status": "reserved",
-        "notes": null,
-        "created_by": 1,
-        "created_by_name": "Admin User",
-        "fulfilled_at": null,
-        "released_at": null,
-        "created_at": "2026-04-25T10:20:00.000000Z"
-      }
+    "recent_shipments": [
+      { "id": 1, "tracking_number": "SHIP-001", "status": "delivered", "cod_amount": "500.00" },
+      { "id": 2, "tracking_number": "SHIP-002", "status": "returned", "cod_amount": "300.00" }
     ],
-    "created_at": "2026-04-25T10:15:00.000000Z"
-  }
-}
-```
-
-Common error response examples:
-
-```json
-{
-  "message": "Only warehouse fulfillment orders can reserve stock."
-}
-```
-
-```json
-{
-  "message": "Order already has active stock reservations."
-}
-```
-
-```json
-{
-  "message": "Not enough available stock."
-}
-```
-
-### POST `/api/orders/{order}/release-stock`
-
-- Method: `POST`
-- Authentication: `Yes`
-- Purpose: Releases all active `reserved` reservations for the order and moves stock back to available.
-
-Success response example:
-
-```json
-{
-  "data": [
-    {
-      "id": 1,
-      "order_id": 15,
-      "order_item_id": 10,
-      "warehouse_id": 1,
-      "warehouse_name": "Main Warehouse",
-      "warehouse_product_id": 4,
-      "product_name": "Blue T-Shirt",
-      "merchant_id": 1,
-      "merchant_name": "Ahmed Store",
-      "quantity": 2,
-      "status": "released",
-      "notes": null,
-      "created_by": 1,
-      "created_by_name": "Admin User",
-      "fulfilled_at": null,
-      "released_at": "2026-04-25T10:30:00.000000Z",
-      "created_at": "2026-04-25T10:20:00.000000Z"
-    }
-  ]
-}
-```
-
-Common error response example:
-
-```json
-{
-  "message": "Cancelled orders cannot manage warehouse stock."
-}
-```
-
-### POST `/api/orders/{order}/fulfill-from-warehouse`
-
-- Method: `POST`
-- Authentication: `Yes`
-- Purpose: Fulfills all active `reserved` reservations for the order and deducts from reserved stock without creating a shipment.
-- Notes:
-- Shipment creation stays in the existing shipment flow.
-- Fulfillment records stock movement type `out`.
-
-Success response example:
-
-```json
-{
-  "data": [
-    {
-      "id": 1,
-      "order_id": 15,
-      "order_item_id": 10,
-      "warehouse_id": 1,
-      "warehouse_name": "Main Warehouse",
-      "warehouse_product_id": 4,
-      "product_name": "Blue T-Shirt",
-      "merchant_id": 1,
-      "merchant_name": "Ahmed Store",
-      "quantity": 2,
-      "status": "fulfilled",
-      "notes": null,
-      "created_by": 1,
-      "created_by_name": "Admin User",
-      "fulfilled_at": "2026-04-25T10:40:00.000000Z",
-      "released_at": null,
-      "created_at": "2026-04-25T10:20:00.000000Z"
-    }
-  ]
-}
-```
-
-Common error response example:
-
-```json
-{
-  "message": "Only warehouse fulfillment orders can reserve stock."
-}
-```
-
-### GET `/api/orders/{order}/stock-reservations`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns all stock reservations for one order ordered by newest first.
-
-Success response example:
-
-```json
-{
-  "data": [
-    {
-      "id": 1,
-      "order_id": 15,
-      "order_item_id": 10,
-      "warehouse_id": 1,
-      "warehouse_name": "Main Warehouse",
-      "warehouse_product_id": 4,
-      "product_name": "Blue T-Shirt",
-      "merchant_id": 1,
-      "merchant_name": "Ahmed Store",
-      "quantity": 2,
-      "status": "reserved",
-      "notes": null,
-      "created_by": 1,
-      "created_by_name": "Admin User",
-      "fulfilled_at": null,
-      "released_at": null,
-      "created_at": "2026-04-25T10:20:00.000000Z"
-    }
-  ]
-}
-```
-
-### GET `/api/stock-reservations`
-
-- Method: `GET`
-- Authentication: `Yes`
-- Purpose: Returns stock reservations with optional filters.
-- Optional filters:
-- `order_id`
-- `warehouse_id`
-- `warehouse_product_id`
-- `status`
-- `merchant_id`
-
-Request examples:
-
-```text
-GET /api/stock-reservations
-GET /api/stock-reservations?status=reserved&warehouse_id=1
-GET /api/stock-reservations?merchant_id=1&order_id=15
-```
-
-Success response example:
-
-```json
-{
-  "data": [
-    {
-      "id": 1,
-      "order_id": 15,
-      "order_item_id": 10,
-      "warehouse_id": 1,
-      "warehouse_name": "Main Warehouse",
-      "warehouse_product_id": 4,
-      "product_name": "Blue T-Shirt",
-      "merchant_id": 1,
-      "merchant_name": "Ahmed Store",
-      "quantity": 2,
-      "status": "reserved",
-      "notes": null,
-      "created_by": 1,
-      "created_by_name": "Admin User",
-      "fulfilled_at": null,
-      "released_at": null,
-      "created_at": "2026-04-25T10:20:00.000000Z"
-    }
-  ]
-}
-```
-
-Common validation error response example:
-
-```json
-{
-  "message": "The selected status is invalid.",
-  "errors": {
-    "status": [
-      "The selected status is invalid."
+    "low_stock_products": [
+      { "product_name": "Product A", "sku": "PROD-A", "quantity": 5, "capacity": 50 }
     ]
   }
 }

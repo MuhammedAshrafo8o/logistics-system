@@ -17,6 +17,7 @@ class DriverCashClosure extends Model
      */
     protected $fillable = [
         'driver_id',
+        'closure_date',
         'expected_amount',
         'received_amount',
         'difference_amount',
@@ -33,6 +34,7 @@ class DriverCashClosure extends Model
     protected function casts(): array
     {
         return [
+            'closure_date' => 'date',
             'expected_amount' => 'decimal:2',
             'received_amount' => 'decimal:2',
             'difference_amount' => 'decimal:2',

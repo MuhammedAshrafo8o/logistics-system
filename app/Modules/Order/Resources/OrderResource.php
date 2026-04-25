@@ -12,6 +12,10 @@ class OrderResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $shipment = $this->relationLoaded('shipment') ? $this->shipment : null;
+        $latestStockReservation = $this->relationLoaded('latestStockReservation') ? $this->latestStockReservation : null;
+        $hasStockReservations = $latestStockReservation !== null;
+
         return [
             'id' => $this->id,
             'merchant_id' => $this->merchant_id,
@@ -34,6 +38,7 @@ class OrderResource extends JsonResource
             'shipping_fee' => $this->shipping_fee,
             'payment_type' => $this->payment_type,
             'fulfillment_type' => $this->fulfillment_type,
+            'pickup_type' => $this->fulfillment_type,
             'is_fragile' =>(bool) $this->is_fragile,
             'allow_inspection' =>(bool) $this->allow_inspection,
             'requires_packaging' =>(bool) $this->requires_packaging,
@@ -46,8 +51,14 @@ class OrderResource extends JsonResource
             'review_reason' => $this->review_reason,
             'status' => $this->status,
             'notes' => $this->notes,
+            'shipment' => $shipment !== null ? [
+                'shipment_id' => $shipment->id,
+                'shipment_number' => $shipment->shipment_number,
+                'shipment_status' => $shipment->status,
+            ] : null,
+            'has_stock_reservations' => $hasStockReservations,
+            'stock_reservation_status' => $hasStockReservations ? $latestStockReservation->status : null,
             'items' => $this->whenLoaded('items', fn () => OrderItemResource::collection($this->items)),
-            'stock_reservations' => $this->whenLoaded('stockReservations', fn () => \App\Modules\Warehouse\Resources\OrderStockReservationResource::collection($this->stockReservations)),
             'created_at' => $this->created_at,
         ];
     }

@@ -60,6 +60,10 @@ class CreateShipmentFromOrderAction
                 'changed_by' => $userId,
             ]);
 
+            $order->update([
+                'status' => OrderStatus::SHIPMENT_CREATED,
+            ]);
+
             return $shipment->fresh();
         });
     }

@@ -16,6 +16,7 @@ class DriverCashClosureResource extends JsonResource
             'id' => $this->id,
             'driver_id' => $this->driver_id,
             'driver_name' => $this->whenLoaded('driver', fn () => $this->driver?->name),
+            'date' => $this->closure_date?->toDateString(),
             'expected_amount' => $this->expected_amount,
             'received_amount' => $this->received_amount,
             'difference_amount' => $this->difference_amount,

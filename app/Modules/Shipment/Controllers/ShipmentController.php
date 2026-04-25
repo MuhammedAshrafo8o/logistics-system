@@ -9,9 +9,12 @@ use App\Modules\Shipment\Actions\CreateShipmentFromOrderAction;
 use App\Modules\Shipment\Models\Shipment;
 use App\Modules\Shipment\Requests\AssignDriverRequest;
 use App\Modules\Shipment\Requests\ListShipmentsRequest;
+use App\Modules\Shipment\Requests\PrintShipmentListRequest;
 use App\Modules\Shipment\Requests\UpdateShipmentStatusRequest;
 use App\Modules\Shipment\Resources\ShipmentResource;
+use App\Modules\Shipment\Services\ShipmentPrintListService;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 
@@ -20,6 +23,7 @@ class ShipmentController
     public function __construct(
         private readonly AssignDriverToShipmentAction $assignDriverToShipmentAction,
         private readonly CreateShipmentFromOrderAction $createShipmentFromOrderAction,
+        private readonly ShipmentPrintListService $shipmentPrintListService,
     ) {
     }
 
@@ -55,6 +59,36 @@ class ShipmentController
     public function show(Shipment $shipment): ShipmentResource
     {
         return new ShipmentResource($shipment->load($this->relations()));
+    }
+
+    public function printList(PrintShipmentListRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+        $shipments = $this->shipmentPrintListService->query($validated)->get();
+
+        return response()->json([
+            'data' => [
+                'generated_at' => now()->toISOString(),
+                'filters' => $validated,
+                'summary' => [
+                    'total_shipments' => $shipments->count(),
+                    'total_cod_amount' => number_format((float) $shipments->sum('cod_amount'), 2, '.', ''),
+                    'total_shipping_fee' => number_format((float) $shipments->sum('shipping_fee'), 2, '.', ''),
+                ],
+                'shipments' => $shipments->map(fn (Shipment $shipment) => [
+                    'shipment_number' => $shipment->shipment_number,
+                    'customer_name' => $shipment->customer_name,
+                    'customer_phone' => $shipment->customer_phone,
+                    'delivery_address' => $shipment->delivery_address,
+                    'delivery_governorate_name' => $shipment->deliveryGovernorate?->name,
+                    'delivery_area_name' => $shipment->deliveryArea?->name,
+                    'merchant_name' => $shipment->merchant?->name,
+                    'merchant_phone' => $shipment->merchant?->phone,
+                    'driver_name' => $shipment->assignedDriver?->name,
+                    'cod_amount' => $shipment->cod_amount,
+                ])->values(),
+            ],
+        ]);
     }
 
     public function createFromOrder(Request $request, Order $order): ShipmentResource

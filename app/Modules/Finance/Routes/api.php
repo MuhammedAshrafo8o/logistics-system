@@ -18,6 +18,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{driverCashClosure}', [DriverCashClosureController::class, 'destroy']);
     });
 
+    Route::post('/drivers/{driver}/cash-closures/generate', [DriverCashClosureController::class, 'generate']);
     Route::get('/drivers/{driver}/cash-expected', [DriverCashClosureController::class, 'expected']);
 
     Route::prefix('expenses')->group(function () {
